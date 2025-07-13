@@ -19,18 +19,16 @@ func WriteResultsCSV(path string, results []model.Result) error {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// 変更点: ヘッダーを "t" から "T" へ
-	if err := writer.Write([]string{"seq", "T", "t", "f"}); err != nil {
+	// 変更点: ヘッダーに "srtt" を追加
+	if err := writer.Write([]string{"seq", "T", "srtt"}); err != nil {
 		return fmt.Errorf("CSVヘッダーの書き込みに失敗しました: %w", err)
 	}
 
 	for _, res := range results {
 		record := []string{
 			strconv.FormatUint(uint64(res.Sequence), 10),
-			// 変更点: res.FirstTxTime から res.TimeDifferenceT へ
 			strconv.FormatFloat(res.TimeDifferenceT, 'f', -1, 64),
-			strconv.FormatFloat(res.Time, 'f', -1, 64),
-			strconv.FormatFloat(res.Timef, 'f', -1, 64),
+			strconv.FormatFloat(res.Srtt, 'f', -1, 64), // 変更点: SRTTの値を追加
 		}
 		if err := writer.Write(record); err != nil {
 			return fmt.Errorf("CSVレコードの書き込みに失敗しました: %w", err)

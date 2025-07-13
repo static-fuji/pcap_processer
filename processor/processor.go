@@ -10,6 +10,7 @@ import (
 
 // findClosestTimestamp は変更ありません (省略)
 func findClosestTimestamp(target float64, sortedTimestamps []float64) (float64, bool) {
+	// (元のコードのまま)
 	if len(sortedTimestamps) == 0 {
 		return 0, false
 	}
@@ -26,8 +27,29 @@ func findClosestTimestamp(target float64, sortedTimestamps []float64) (float64, 
 	return sortedTimestamps[i], true
 }
 
-// ProcessData は状態遷移とpcapデータから最終結果を導出します。
-func ProcessData(states []model.StateEvent, pcapData *pcapio.PcapData) []model.Result {
+// findLastSrttBefore は、targetTimeの直前のSRTTイベントを探します。
+// SRTTデータは時刻でソートされている必要があります。
+func findLastSrttBefore(targetTime float64, srttData []model.SrttEvent) (float64, bool) {
+	if len(srttData) == 0 {
+		return 0, false
+	}
+
+	// targetTimeを超える最初の要素のインデックスを探す
+	i := sort.Search(len(srttData), func(i int) bool {
+		return srttData[i].Timestamp >= targetTime
+	})
+
+	// iが0の場合、targetTimeより前の時刻のデータは存在しない
+	if i == 0 {
+		return 0, false
+	}
+
+	// 探しているのはインデックス i の1つ前の要素
+	return srttData[i-1].Srtt, true
+}
+
+// ProcessData のシグネチャを変更し、srttDataを受け取るようにします。
+func ProcessData(states []model.StateEvent, pcapData *pcapio.PcapData, srttData []model.SrttEvent) []model.Result {
 	resultsMap := make(map[uint32]model.Result)
 
 	for _, event := range states {
@@ -45,26 +67,31 @@ func ProcessData(states []model.StateEvent, pcapData *pcapio.PcapData) []model.R
 			log.Printf("警告: CSV時刻 %.6f に最も近いpcap時刻 %.6f は差分が大きいです。", fFromCSV, f)
 		}
 
-		segments := pcapData.PacketsByTimestamp[f]
+		// 変更点: fを基準に直前のSRTTを探す
+		srttValue, srttFound := findLastSrttBefore(f, srttData)
+		if !srttFound {
+			log.Printf("警告: 時刻 %.6f の直前のSRTTが見つかりませんでした。", f)
+			srttValue = 0 // 見つからない場合は0を設定
+		}
 
+		segments := pcapData.PacketsByTimestamp[f]
 		for _, segment := range segments {
 			s := segment.Seq
 			if s == 0 || s == 1 {
 				continue
 			}
 
-			// t: sが初めて送信された時刻
 			t, ok := pcapData.FirstSeen[s]
 			if !ok {
 				log.Printf("警告: シーケンス番号 %d の初回送信時刻が見つかりません。", s)
 				continue
 			}
 
-			// 変更点: T = f - t を計算する
 			T := f - t
+			T = math.Round(T*10000000) / 10000000
 
-			// 変更点: 結果としてtの代わりにTを格納する
-			resultsMap[s] = model.Result{Sequence: s, TimeDifferenceT: T, Time: t, Timef: f}
+			// 変更点: 結果にsrttValueを追加
+			resultsMap[s] = model.Result{Sequence: s, TimeDifferenceT: T, Srtt: srttValue}
 		}
 	}
 
